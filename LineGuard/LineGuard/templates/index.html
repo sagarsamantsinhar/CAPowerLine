@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vegetation Fire Risk Monitor</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=1026.0">
+</head>
+
+<body>
+    <!-- App Banner -->
+    <div id="appBanner" class="glass-panel p-3 text-center">
+        <h2>🔥 <strong>Power Line Vegetation Monitor</strong> 🔥</h2>
+        <p>Visualize California transmission lines and nearby vegetation growth. Track potential fire hazards and alerts
+            over time. Use the sidebar to focus on specific cities or coordinates.</p>
+    </div>
+
+    <button id="togglePanelsBtn" class="button-17"
+        style="position:absolute; top:150px; left:10px; z-index:1200;">☰</button>
+
+    <!-- Metrics Panel (Right Side) -->
+    <div id="metricsPanel" class="glass-panel p-2">
+        <h5 class="text-center">📊 Live Metrics</h5>
+        <div class="metric-item">
+            <span class="metric-label">🔴 Active Alerts</span>
+            <span class="metric-value" id="alertCount">0</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">🟡 Monitored Assets</span>
+            <span class="metric-value" id="zoneCount">0</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">🌱 Avg Vegetation</span>
+            <span class="metric-value" id="avgHeight">0.0m</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">📈 Growth Rate</span>
+            <span class="metric-value" id="growthRateDisplay" style="color: #10b981;">-</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">📅 Breach Forecast</span>
+            <span class="metric-value" id="breachPrediction" style="color: #ef4444;">-</span>
+        </div>
+        
+        <h6 class="text-center">
+            🤖 AI Risk Assessment
+        </h6>
+        <div class="metric-item">
+            <span class="metric-label">ML Risk Level</span>
+            <span class="metric-value" id="mlRiskLevel">-</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Risk Score</span>
+            <span class="metric-value" id="mlRiskScore" style="color: #818cf8;">-</span>
+        </div>
+        <div class="metric-item">
+            <span class="metric-label">Confidence</span>
+            <span class="metric-value" id="mlConfidence" style="color: #10b981;">-</span>
+        </div>
+        
+        <h6 class="text-center mt-2">
+            📊 Risk Levels
+        </h6>
+        <div id="legend" class="legend-modern">
+            <div class="legend-item">
+                <span>
+                    <i class="fas fa-circle-check" style="color: #10b981;"></i>
+                    <strong>Low</strong> (<span id="lowCount">0</span>)
+                </span>
+                <div class="legend-desc">Veg < 1m</div>
+            </div>
+            <div class="legend-item">
+                <span>
+                    <i class="fas fa-triangle-exclamation" style="color: #f59e0b;"></i>
+                    <strong>Moderate</strong> (<span id="moderateCount">0</span>)
+                </span>
+                <div class="legend-desc">Veg 1-2.5m</div>
+            </div>
+            <div class="legend-item">
+                <span>
+                    <i class="fas fa-circle-exclamation" style="color: #ef4444;"></i>
+                    <strong>High</strong> (<span id="highCount">0</span>)
+                </span>
+                <div class="legend-desc">Veg >2.5m / Clr <6m</div>
+            </div>
+        </div>
+        
+        <button id="notifyAuthorityBtn" class="btn-notify w-100 mt-2">
+            <i class="fas fa-bell"></i> Notify Authorities
+        </button>
+    </div>
+
+    <!-- Merged Sidebar with Tabs (Left Side) -->
+    <div id="mergedPanel" class="glass-panel p-3">
+        <!-- Tab Navigation -->
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab1-btn" data-bs-toggle="tab" data-bs-target="#tab1" type="button" role="tab">
+                    City Focus
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab2-btn" data-bs-toggle="tab" data-bs-target="#tab2" type="button" role="tab">
+                    Predictor
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- Tab 1: Focus on City or Coordinate -->
+            <div class="tab-pane fade show active" id="tab1" role="tabpanel">
+                <h3 class="mb-3"><i class="fas fa-broadcast-tower"></i> Monitor Transmission Towers</h3>
+
+                <label for="citySelect" class="form-label fw-bold"><i class="fas fa-city"></i> Select City</label>
+                <select id="citySelect" class="form-select mb-3 modern-input">
+                    <option value="">-- Select City --</option>
+                    <option value="adelanto">Adelanto</option>
+                    <option value="agouraHills">Agoura Hills</option>
+                    <option value="alameda">Alameda</option>
+                    <option value="alhambra">Alhambra</option>
+                    <option value="alisoViejo">Aliso Viejo</option>
+                    <option value="alpine">Alpine</option>
+                    <option value="altadena">Altadena</option>
+                    <option value="alturas">Alturas</option>
+                    <option value="amador">Amador</option>
+                    <option value="americanCanyon">American Canyon</option>
+                    <option value="anaheim">Anaheim</option>
+                    <option value="anaheimHills">Anaheim Hills</option>
+                    <option value="anderson">Anderson</option>
+                    <option value="angelsCamp">Angels Camp</option>
+                    <option value="angelusOaks">Angelus Oaks</option>
+                    <option value="antioch">Antioch</option>
+                    <option value="appleValley">Apple Valley</option>
+                    <option value="aptos">Aptos</option>
+                    <option value="arcadia">Arcadia</option>
+                    <option value="arcata">Arcata</option>
+                    <option value="arnold">Arnold</option>
+                    <option value="arroyoGrande">Arroyo Grande</option>
+                    <option value="artesia">Artesia</option>
+                    <option value="atascadero">Atascadero</option>
+                    <option value="auburn">Auburn</option>
+                    <option value="avalon">Avalon</option>
+                    <option value="avilaBeach">Avila Beach</option>
+                    <option value="azusa">Azusa</option>
+                    <option value="bakersfield">Bakersfield</option>
+                    <option value="bigbar">Big Bar Mountain</option>
+                    <option value="boulderCreek">Boulder Creek</option>
+                    <option value="chulaVista">Chula Vista</option>
+                    <option value="fresno">Fresno</option>
+                    <option value="irvine">Irvine</option>
+                    <option value="longBeach">Long Beach</option>
+                    <option value="losAngeles">Los Angeles</option>
+                    <option value="oakland">Oakland</option>
+                    <option value="panocheValley">Panoche Valley Solar Farm</option>
+                    <option value="riverside">Riverside</option>
+                    <option value="sacramento">Sacramento</option>
+                    <option value="sanDiego">San Diego</option>
+                    <option value="sanFrancisco">San Francisco</option>
+                    <option value="sanJose">San Jose</option>
+                    <option value="santaAna">Santa Ana</option>
+                    <option value="stockton">Stockton</option>
+                </select>
+
+                <label class="form-label fw-bold"><i class="fas fa-map-pin"></i> Or Input Lat-Long</label>
+                <div class="d-flex mb-3">
+                    <input type="number" id="latInput" placeholder="Latitude" class="form-control me-1 modern-input" step="0.0001">
+                    <input type="number" id="lonInput" placeholder="Longitude" class="form-control modern-input" step="0.0001">
+                </div>
+
+                <button id="goBtn" class="button-17 w-100">
+                    <i class="fas fa-search"></i> Scan Area
+                </button>
+
+                <!-- Tower Monitoring Info -->
+                <div id="alertsBox" class="alert-list mt-3">
+                    <h6 class="fw-bold"><i class="fas fa-broadcast-tower"></i> Tower Monitoring</h6>
+                    <div id="alertItems">Select a city or enter coordinates to scan transmission towers with vegetation risk metrics</div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Power Line Vegetation Predictor -->
+            <div class="tab-pane fade" id="tab2" role="tabpanel">
+                <h3 class="mb-3"><i class="fas fa-chart-line"></i> Time Predictor</h3>
+                <div class="d-flex justify-content-center gap-2 mb-3">
+                    <button id="playBtn" class="btn-control btn-play" title="Play">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <button id="pauseBtn" class="btn-control btn-pause" title="Pause">
+                        <i class="fas fa-pause"></i>
+                    </button>
+                    <button id="resetBtn" class="btn-control btn-reset" title="Reset">
+                        <i class="fas fa-rotate-left"></i>
+                    </button>
+                </div>
+
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <label for="dayRange" class="form-label fw-bold mb-0">
+                        <i class="far fa-calendar-alt"></i> Date:
+                    </label>
+                    <span id="dayLabel" class="date-badge">0</span>
+                </div>
+                <input id="dayRange" type="range" min="0" max="30" value="0" class="form-range modern-range mb-3">
+
+                <!-- Active Alerts - Shows alerts for the simulated date -->
+                <div class="alert-list mt-2">
+                    <h6 class="fw-bold"><i class="fas fa-bell"></i> Active Alerts <span class="pulse-dot"></span></h6>
+                    <div id="alertItemsPredictor">No active alerts</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/main.js?v=1037.0"></script>
+</body>
+
+</html>
