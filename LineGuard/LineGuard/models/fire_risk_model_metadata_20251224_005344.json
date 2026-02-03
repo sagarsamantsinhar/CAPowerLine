@@ -1,0 +1,44 @@
+{
+  "timestamp": "20251224_005344",
+  "feature_names": [
+    "veg_height_m",
+    "clearance_m",
+    "temperature_c",
+    "humidity_pct",
+    "wind_speed_ms",
+    "days_since_rain",
+    "latitude",
+    "longitude",
+    "season",
+    "vegetation_growth_rate",
+    "distance_to_powerline",
+    "veg_to_clearance_ratio",
+    "fire_danger_index",
+    "moisture_deficit"
+  ],
+  "risk_levels": [
+    "Low",
+    "Moderate",
+    "High",
+    "Critical"
+  ],
+  "risk_thresholds": {
+    "Low": [
+      0.0,
+      0.25
+    ],
+    "Moderate": [
+      0.25,
+      0.55
+    ],
+    "High": [
+      0.55,
+      0.8
+    ],
+    "Critical": [
+      0.8,
+      1.0
+    ]
+  },
+  "has_shap": true
+}
