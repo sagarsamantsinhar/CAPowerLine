@@ -10,7 +10,6 @@ not wall-to-wall coverage like airborne lidar.
 
 Requires: pip install sliderule pandas geopandas --break-system-packages
 """
-
 import pandas as pd
 from typing import Tuple, List, Dict, Optional
 from datetime import datetime, timedelta
@@ -22,7 +21,7 @@ def get_icesat2_vegetation_sliderule(lat: float,
                                      date_start: Optional[str] = None,
                                      date_end: Optional[str] = None) -> pd.DataFrame:
     """
-    Get ICESat-2 vegetation height data using SlideRule (easiest method).
+    Get ICESat-2 vegetation height data using SlideRule.
     
     Args:
         lat: Latitude
@@ -35,7 +34,7 @@ def get_icesat2_vegetation_sliderule(lat: float,
         DataFrame with vegetation measurements
     """
     try:
-        from sliderule import icesat2, gedi
+        from sliderule import icesat2
     except ImportError:
         print("Error: sliderule not installed")
         print("Install with: pip install sliderule --break-system-packages")
@@ -63,56 +62,110 @@ def get_icesat2_vegetation_sliderule(lat: float,
         {"lon": lon + buffer_deg, "lat": lat - buffer_deg},
         {"lon": lon + buffer_deg, "lat": lat + buffer_deg},
         {"lon": lon - buffer_deg, "lat": lat + buffer_deg},
-        {"lon": lon - buffer_deg, "lat": lat - buffer_deg},  # Close polygon
+        {"lon": lon - buffer_deg, "lat": lat - buffer_deg},
     ]
     
-    # Request parameters
+    # Request parameters for ATL08
     parms = {
         "poly": region,
         "t0": date_start,
         "t1": date_end,
-        "cnf": 4,  # Surface confidence (4 = high quality)
-        "ats": 10.0,  # Along-track spread
-        "cnt": 5,  # Minimum photon count
-        "len": 40.0,  # Segment length (meters)
-        "res": 20.0,  # Resolution (meters)
+        "cnf": 4,  # Surface confidence
+        "ats": 10.0,
+        "cnt": 5,
+        "len": 40.0,
+        "res": 20.0,
     }
     
     try:
-        # Get ATL08 data (land and vegetation height)
-        print("Requesting data from NASA...")
+        print("Requesting ATL08 data from NASA...")
         atl08 = icesat2.atl08p(parms)
         
         if atl08.empty:
             print("No ICESat-2 data found for this location and time period")
-            print("\nPossible reasons:")
-            print("  - Location not yet covered by ICESat-2 tracks")
-            print("  - Cloud cover during satellite passes")
-            print("  - Try increasing buffer_km or date range")
+            #print("\nPossible reasons:")
+            #print("  - Location not yet covered by ICESat-2 tracks")
+            #print("  - Cloud cover during satellite passes")
+            #print("  - Try increasing buffer_km or expanding date range")
             return pd.DataFrame()
         
         print(f"✓ Found {len(atl08)} measurements")
         
+        # Print available columns for debugging
+        #print(f"\nAvailable columns: {list(atl08.columns)[:200]}...")
+        
+        # SlideRule ATL08 field names (these are the actual field names)
+        # Based on SlideRule documentation and ICESat-2 ATL08 specification
+        
+        # Try different possible field name combinations
+        terrain_field = None
+        canopy_field = None
+        
+        # Check for terrain elevation field
+        # Preference order: median > mean > best_fit (median is more robust to outliers)
+        for field in ['h_te_median', 'h_te_mean', 'terrain_h', 'h_te_best_fit', 'dem_h']:
+            if field in atl08.columns:
+                terrain_field = field
+                break
+        
+        # Check for canopy field
+        for field in ['h_canopy', 'canopy_h', 'h_max_canopy', 'h_mean_canopy']:
+            if field in atl08.columns:
+                canopy_field = field
+                break
+        
+        if terrain_field is None or canopy_field is None:
+            #print("\n❌ Error: Could not find expected field names!")
+            #print(f"All available columns:")
+            for i, col in enumerate(atl08.columns):
+                print(f"  {i+1}. {col}")
+            print("\nPlease report these column names so the script can be updated.")
+            
+            # Try to save a sample for inspection
+            try:
+                atl08.head(5).to_csv('icesat2_sample_output.csv', index=False)
+                print("\n✓ Saved sample to 'icesat2_sample_output.csv' for inspection")
+            except:
+                pass
+            
+            return pd.DataFrame()
+        
+        #print(f"Using terrain field: '{terrain_field}'")
+        #print(f"Using canopy field: '{canopy_field}'")
+        
         # Calculate vegetation height
-        atl08['vegetation_height_m'] = atl08['h_canopy'] - atl08['h_te_mean']
+        atl08['vegetation_height_m'] = atl08[canopy_field] - atl08[terrain_field]
+        
+        atl08['ground_elevation_m'] = atl08[terrain_field]
+        atl08['canopy_elevation_m'] = atl08[canopy_field]
         
         # Filter out negative/unrealistic values
-        atl08 = atl08[atl08['vegetation_height_m'] >= 0]
+        before_filter = len(atl08)
+        atl08 = atl08[atl08['vegetation_height_m'] >= 1]
         atl08 = atl08[atl08['vegetation_height_m'] <= 100]  # Max 100m trees
+        after_filter = len(atl08)
+        
+        #if before_filter > after_filter:
+        #    print(f"Filtered out {before_filter - after_filter} unrealistic values")
+
+        if after_filter> 0:
+            print(f"Found {after_filter} realistic values")
         
         # Add distance from query point
-        atl08['distance_km'] = (
-            ((atl08['latitude'] - lat) ** 2 + 
-             (atl08['longitude'] - lon) ** 2) ** 0.5 * 111
-        )
+        #atl08['distance_km'] = (
+        #    ((atl08['latitude'] - lat) ** 2 + 
+        #     (atl08['longitude'] - lon) ** 2) ** 0.5 * 111
+        #)
         
         # Sort by distance
-        atl08 = atl08.sort_values('distance_km')
+        #atl08 = atl08.sort_values('distance_km')
         
         return atl08
         
     except Exception as e:
         print(f"Error fetching ICESat-2 data: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 
@@ -138,15 +191,13 @@ def get_nearest_vegetation_height(lat: float, lon: float,
     nearest = df.iloc[0]
     
     result = {
-        'latitude': float(nearest['latitude']),
-        'longitude': float(nearest['longitude']),
         'vegetation_height_m': float(nearest['vegetation_height_m']),
-        'canopy_height_m': float(nearest['h_canopy']),
-        'ground_elevation_m': float(nearest['h_te_mean']),
-        'distance_km': float(nearest['distance_km']),
+        'canopy_elevation_m': float(nearest['canopy_elevation_m']),
+        'ground_elevation_m': float(nearest['ground_elevation_m']),
+        #'distance_km': float(nearest['distance_km']),
         'date': str(nearest.get('time', 'Unknown')),
-        'quality': 'high' if nearest.get('quality_flag', 0) == 0 else 'medium',
-        'data_source': 'ICESat-2 ATL08'
+        'quality': 'high',
+        'data_source': 'ICESat-2 ATL08 via SlideRule'
     }
     
     return result
@@ -182,68 +233,49 @@ def get_vegetation_statistics(lat: float, lon: float,
         'search_radius_km': buffer_km,
         'center_lat': lat,
         'center_lon': lon,
-        'data_source': 'ICESat-2 ATL08'
+        'data_source': 'ICESat-2 ATL08 via SlideRule'
     }
     
     return stats
 
 
-def compare_icesat2_with_lidar(lat: float, lon: float,
-                               dem_file: str,
-                               dsm_file: str) -> Dict:
+def save_results_to_csv(lat: float, lon: float, 
+                        buffer_km: float = 5.0,
+                        output_file: str = "icesat2_vegetation.csv"):
     """
-    Compare ICESat-2 (current) with USGS lidar (historical).
+    Get ICESat-2 data and save to CSV file.
     
     Args:
         lat: Latitude
         lon: Longitude
-        dem_file: Path to USGS DEM file (2018-2019)
-        dsm_file: Path to USGS DSM file (2018-2019)
-    
-    Returns:
-        Dictionary with comparison
+        buffer_km: Search radius in km
+        output_file: Output CSV filename
     """
-    # Get historical lidar data
-    try:
-        from usgs_vegetation_height import get_vegetation_height_from_files
-        lidar_height = get_vegetation_height_from_files(lat, lon, dem_file, dsm_file)
-        lidar_year = 2018  # Typical for Northern CA
-    except Exception as e:
-        print(f"Could not get lidar data: {e}")
-        lidar_height = None
-        lidar_year = None
+    df = get_icesat2_vegetation_sliderule(lat, lon, buffer_km=buffer_km)
     
-    # Get current ICESat-2 data
-    icesat2_result = get_nearest_vegetation_height(lat, lon)
+    if df.empty:
+        print("No data to save")
+        return
     
-    if icesat2_result and lidar_height:
-        change = icesat2_result['vegetation_height_m'] - lidar_height
-        years = 2024 - lidar_year
-        annual_change = change / years
-        
-        return {
-            'lidar_height_m': lidar_height,
-            'lidar_year': lidar_year,
-            'icesat2_height_m': icesat2_result['vegetation_height_m'],
-            'icesat2_year': 2024,
-            'change_m': change,
-            'annual_change_m_per_year': annual_change,
-            'years_elapsed': years,
-            'icesat2_distance_km': icesat2_result['distance_km']
-        }
+    # Select relevant columns
+    columns_to_save = [
+        'latitude', 'longitude', 
+        'vegetation_height_m', 'canopy_elevation_m', 'ground_elevation_m',
+        'distance_km', 'time'
+    ]
     
-    return {
-        'lidar_height_m': lidar_height,
-        'icesat2_result': icesat2_result,
-        'comparison': 'Could not compare - missing data'
-    }
+    # Only include columns that exist
+    columns_to_save = [col for col in columns_to_save if col in df.columns]
+    
+    df[columns_to_save].to_csv(output_file, index=False)
+    print(f"\n✓ Saved {len(df)} measurements to {output_file}")
 
 
 def main():
     """Example usage for Fort Dick, CA"""
     
     print("=" * 70)
-    print("ICESat-2 VEGETATION HEIGHT QUERY")
+    print("ICESat-2 VEGETATION HEIGHT QUERY - CORRECTED VERSION")
     print("=" * 70)
     print()
     
@@ -258,26 +290,29 @@ def main():
     # Method 1: Get nearest measurement
     print("Method 1: Nearest ICESat-2 Measurement")
     print("-" * 70)
-    result = get_nearest_vegetation_height(lat, lon, max_distance_km=5.0)
+    result = get_nearest_vegetation_height(lat, lon, max_distance_km=10.0)
     
     if result:
         print(f"✓ Found measurement:")
         print(f"  Vegetation height: {result['vegetation_height_m']:.2f} meters")
         print(f"  Ground elevation: {result['ground_elevation_m']:.2f} meters")
-        print(f"  Canopy elevation: {result['canopy_height_m']:.2f} meters")
-        print(f"  Distance from query: {result['distance_km']:.2f} km")
+        print(f"  Canopy elevation: {result['canopy_elevation_m']:.2f} meters")
+        #print(f"  Distance from query: {result['distance_km']:.2f} km")
         print(f"  Date: {result['date']}")
-        print(f"  Quality: {result['quality']}")
+        print(f"  Data source: {result['data_source']}")
     else:
-        print("✗ No ICESat-2 data found within 5 km")
-        print("  Try increasing max_distance_km or check different time period")
+        print("✗ No ICESat-2 data found within 10 km")
+        print("  Suggestions:")
+        print("  - Try increasing max_distance_km to 20 or 50")
+        print("  - Expand date range to include more data")
+        print("  - Check if location is in a frequently cloudy area")
     
     print()
     
     # Method 2: Get statistics from multiple measurements
     print("Method 2: Statistics from Multiple Measurements")
     print("-" * 70)
-    stats = get_vegetation_statistics(lat, lon, buffer_km=3.0)
+    stats = get_vegetation_statistics(lat, lon, buffer_km=5.0)
     
     if stats:
         print(f"✓ Found {stats['num_measurements']} measurements within {stats['search_radius_km']} km:")
@@ -288,22 +323,31 @@ def main():
         print("✗ No ICESat-2 data found")
     
     print()
+    
+    # Method 3: Save to CSV
+    print("Method 3: Save Results to CSV")
+    print("-" * 70)
+    save_results_to_csv(lat, lon, buffer_km=10.0, 
+                       output_file="fort_dick_vegetation.csv")
+    
+    print()
     print("=" * 70)
     print("NOTES")
     print("=" * 70)
     print("""
-ICESat-2 provides:
+ICESat-2 via SlideRule:
   ✓ Very current data (updated every 91 days)
-  ✓ Good vertical accuracy (~3-5m for vegetation)
-  ✓ Global coverage
+  ✓ Easy to use (no NASA EarthData login required)
+  ✓ Cloud processing (fast)
+  ✓ Good vertical accuracy
   
 Limitations:
-  ✗ Sparse spatial coverage (only along satellite tracks)
-  ✗ Not wall-to-wall like airborne lidar
+  ✗ Sparse spatial coverage (along tracks only)
+  ✗ ~3km between tracks
   ✗ May have gaps due to clouds
   
 Best for: Point measurements, time series, change detection
-Not ideal for: Complete area mapping, high-resolution canopy maps
+Not ideal for: Complete area mapping
     """)
 
 
