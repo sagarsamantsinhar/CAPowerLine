@@ -7,6 +7,9 @@ from risk_model import FireRiskModel
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from powerline_points import extract_powerline_points
+from icesat2_vegetation_height import get_nearest_vegetation_height
+from icesat2_vegtn_height_use_cache import get_icesat2_with_cache
+
 
 app = Flask(__name__)
 
@@ -123,11 +126,11 @@ def fetch_elevation_lidar(lat, lon):
             ground_elevation = data['value']
             
             # California vegetation patterns (rough estimates by elevation)
-            if ground_elevation < 100:  # Valley floor
+            if float(ground_elevation) < 100:  # Valley floor
                 base_vegetation = random.uniform(2.5, 4.5)  # Grassland/shrubs
-            elif ground_elevation < 500:  # Foothills
+            elif float(ground_elevation) < 500:  # Foothills
                 base_vegetation = random.uniform(4.0, 8.0)  # Mixed vegetation
-            elif ground_elevation < 1500:  # Lower mountains
+            elif float(ground_elevation) < 1500:  # Lower mountains
                 base_vegetation = random.uniform(6.0, 15.0)  # Trees
             else:  # Higher elevation
                 base_vegetation = random.uniform(3.0, 10.0)  # Alpine/forest mix
@@ -561,19 +564,22 @@ def ml_batch_predict():
 # In production, this would connect to utility company databases
 
 def calculate_risk_level(clearance, line_voltage):
-    
-    if line_voltage >= 700:
-        clearance_low = 9
+    kv = float(line_voltage)
+    if kv < 70:
+        clearance_medium = 2
+        clearance_high = 1.5
+    elif kv <= 115:
+        clearance_medium = 3
+        clearance_high = 2
+    elif kv <= 230:
+        clearance_medium = 4
+        clearance_high = 3
+    elif kv <= 230:
         clearance_medium = 6
         clearance_high = 4
-    elif line_voltage >= 500:
-        clearance_low = 8
-        clearance_medium = 5
-        clearance_high = 2
     else:
-        clearance_low = 7
-        clearance_medium = 4
-        clearance_high = 1
+        clearance_medium = 6
+        clearance_high = 4.5
     
     
     if clearance < clearance_high:
@@ -629,6 +635,7 @@ def get_transmission_lines():
             line_height = get_line_height(kv_numeric)  # Now handles None internally
             
             # Determine alert status
+            clearance = 1
             alert = clearance < THRESHOLD_DISTANCE
             
             # Risk level
@@ -636,7 +643,7 @@ def get_transmission_lines():
             
             # Growth rate and breach prediction
             growth_rate = round(random.uniform(0.5, 1.5), 1)
-            if clearance > THRESHOLD_DISTANCE and growth_rate > 0:
+            if 1 > THRESHOLD_DISTANCE and growth_rate > 0:
                 days_until_breach = max(0, int((clearance - THRESHOLD_DISTANCE) / (growth_rate / 100)))
             else:
                 days_until_breach = 0 if alert else 999
@@ -647,7 +654,7 @@ def get_transmission_lines():
                 'voltage': f'{int(kv_numeric)}kV' if kv_numeric else 'Unknown',  # Display actual kV or Unknown
                 'latitude': round(tower_lat, 6),
                 'longitude': round(tower_lon, 6),
-                'veg_height_m': veg_height,
+                'veg_height_m': 0,
                 'clearance_m': clearance,
                 'line_height_m': line_height,
                 'kv_rating': int(kv_numeric) if kv_numeric else 'Unknown',  # ADD kV rating to response
@@ -714,18 +721,18 @@ def get_line_height(kilovolts):
     
     kv = float(kilovolts)
     
-    # Voltage class -> Minimum clearance height (meters)
+    # Voltage class -> Conductor height (meters)
     if kv <= 0:
-        return 5.0  # Safety minimum
+        return 4.0  # Safety minimum
     elif kv < 35:
         # Distribution lines (12kV, 25kV, 34.5kV)
-        return 5.5  # meters (~18 feet)
+        return 5  # meters (~18 feet)
     elif kv < 69:
         # Sub-transmission (46kV, 55kV, 69kV)
         return 7.0  # meters (~23 feet)
     elif kv < 115:
         # Lower transmission (69kV, 115kV)
-        return 9.0  # meters (~30 feet)
+        return 8.0  # meters (~30 feet)
     elif kv < 230:
         # Medium transmission (115kV, 138kV, 230kV)
         return 12.0  # meters (~40 feet)
@@ -734,10 +741,10 @@ def get_line_height(kilovolts):
         return 15.0  # meters (~50 feet)
     elif kv < 500:
         # Extra high voltage (345kV, 500kV)
-        return 18.0  # meters (~60 feet)
+        return 16.0  # meters (~60 feet)
     else:
         # Ultra high voltage (500kV, 765kV)
-        return 24.0  # meters (~80 feet)
+        return 20.0  # meters (~80 feet)
 
 @app.route('/api/detect_vegetation_risk')
 def get_vegetation_risk_():
@@ -745,12 +752,11 @@ def get_vegetation_risk_():
     try:
         lat = float(request.args.get('lat', 37.75))
         lon = float(request.args.get('lon', -121.8))
-        radius_mi = float(request.args.get('radius', 20))
+        radius_mi = float(request.args.get('radius', 10))
         
         #Find points along transmission lines within radius
         geojson_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources', 'ustrlines.geojson')
-        interval = 1000  # feet
-        #points = extract_powerline_points(geojson_file,41.868074,-124.152736,20,interval)
+        interval = 3000  # feet
         points = extract_powerline_points(geojson_file,lat,lon,radius_mi,interval)
         
         # For each point along powerline determine  vegetation height
@@ -770,30 +776,38 @@ def get_vegetation_risk_():
             elif isinstance(kv_rating, (int, float)):
                 kv_numeric = float(kv_rating)
             
-            elevation_data = fetch_elevation_lidar(line_lat, line_lon)
-            veg_height = elevation_data['vegetation_height_m']
+            #height_data = get_nearest_vegetation_height(line_lat, line_lon, 3.0)
+            height_data = get_icesat2_with_cache(line_lat, line_lon, buffer_km=3.0)
+            vegetation_height_m = height_data['vegetation_height_m'] if height_data else 0.0
             
+            if vegetation_height_m is None or vegetation_height_m == 0:
+                continue # Skip if we couldn't get vegetation height
+
             line_height = get_line_height(kv_numeric) if kv_numeric else 8.0  # Default line height if no kV
-            clearance = round(line_height - veg_height, 2)
+            clearance = round(line_height - vegetation_height_m, 2)
+            print(f"Clearance='{clearance}'")
             
             # Risk level
             risk_level = calculate_risk_level(clearance, kv_numeric) if kv_numeric else 'unknown'  # Default risk if no kV
-            
+            print(f"Risk level='{risk_level}'")
+
             # Print kV rating for this location
             #print(f"Point {i+1}: Lat={line_lat:.4f}, Lon={line_lon:.4f}, kV={kv_rating}, Veg Height={veg_height:.2f}m, Clearance={clearance:.2f}m, Risk={risk_level}")
             
-            towers.append({
-                'point_id': f'P-{i+1:03d}',
-                'latitude': round(line_lat, 6),
-                'longitude': round(line_lon, 6),
-                'veg_height_m': veg_height,
-                'clearance_m': clearance,
-                'line_height_m': line_height,
-                'kv_rating': int(kv_numeric) if kv_numeric else 'Unknown',
-                'risk_level': risk_level,
-                'alert': clearance < THRESHOLD_DISTANCE
+            if risk_level != 'low':
+                towers.append({
+                    'point_id': f'P-{i+1:03d}',
+                    'latitude': round(line_lat, 6),
+                    'longitude': round(line_lon, 6),
+                    'veg_height_m': vegetation_height_m,
+                    'clearance_m': clearance,
+                    'line_height_m': line_height,
+                    'kv_rating': int(kv_numeric) if kv_numeric else 'Unknown',
+                    'risk_level': risk_level,
+                    'alert': clearance < THRESHOLD_DISTANCE
             })
-        alert_count = sum(1 for t in towers if t['alert'])
+            
+        alert_count = sum(1 for t in towers if t['risk_level'] == 'high')
         
         # Calculate average kV rating (only numeric values, exclude 'Unknown')
         avg_kv = [t['kv_rating'] for t in towers if isinstance(t['kv_rating'], (int, float))]
@@ -819,7 +833,7 @@ def get_vegetation_risk_():
             'note': 'Real power line data with actual kV ratings'
         }
         
-        print(f"✅ Generated {len(towers)} points along transmission lines ({alert_count} alerts)")
+        print(f"✅ Generated {len(points)} points along transmission lines and found ({alert_count} alerts)")
         return jsonify(result)
         
     except Exception as e:

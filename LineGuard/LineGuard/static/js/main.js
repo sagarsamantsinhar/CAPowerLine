@@ -223,7 +223,7 @@ async function updateMapByDate(dateStr) {
         const zoneIcon = L.divIcon({
             className: 'clean-marker',
             html: `<div style="
-                background-color: ${markerColor}; 
+            background-color: ${markerColor}; 
                 width: 30px; 
                 height: 30px; 
                 border-radius: 50%; 

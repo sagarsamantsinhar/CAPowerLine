@@ -81,8 +81,8 @@ def sample_points_along_line(line: LineString,
 def extract_powerline_points(geojson_file: str,
                             center_lat: float,
                             center_lon: float,
-                            radius_miles: float = 50,
-                            interval_feet: float = 3,
+                            radius_miles: float = 10,
+                            interval_feet: float = 3000,
                             verbose: bool = True) -> List[dict]:  # Changed return type
     """
     Extract points along power transmission lines within a radius.
